@@ -1,7 +1,13 @@
 # Ignore virtual environment folders
 venv/
 .venv/
-env/
 
-# Ignore Log files
-*.log
+# Environment variables — never commit this
+.env
+ 
+# Log files
+logs/
+ 
+# Python cache
+__pycache__/
+*.pyc
