@@ -4,6 +4,8 @@
 
 A cross-platform IT support automation tool that diagnoses system health, identifies root causes, cleans up temp files, and sends a Gmail alert when action is needed.
 
+No manual digging. No wasted time. Just run it and get answers.
+
 ---
 
 ## Scenario
@@ -36,25 +38,33 @@ python health_check.py
 - Cleans up temporary files if the system is under stress
 - Sends a Gmail alert with the full report when overall status is WARNING
 - Saves a timestamped log for every run
+- Validates and installs dependencies automatically on first run
 
 ### How it works
 
 ```
-Run health_check.py
+python health_check.py
         │
         ▼
-  checkers.py          Measure CPU / RAM / Disk / Network / Services
+  setup.py                Validate dependencies from config.json
+  (auto-install if missing)
         │
         ▼
-  reporter.py          Build report — if WARNING → call analyzers.py
+  checkers.py             Measure CPU / RAM / Disk / Network / Services
         │
-        ├─ OK ──────▶  Print report + save log
+        ▼
+  reporter.py             Build report — if WARNING → call analyzers.py
         │
-        └─ WARNING ──▶  Print report + save log
+        ├─ OK ──────────▶  Print report + save log
+        │
+        └─ WARNING ─────▶  Print report + save log
                                │
                                ▼
                         remediation.py
-                        ├─ Clean up temp files
+                        ├─ Check admin privileges
+                        │   ├─ Admin    : clean user temp + system temp
+                        │   └─ No admin : clean user temp only
+                        │               prompt to relaunch as admin
                         └─ Send Gmail alert
 ```
 
@@ -68,19 +78,35 @@ sys-health-check/
 ├── remediation.py    # Cleans temp files and sends Gmail alert
 ├── reporter.py       # Builds the report and saves the log
 ├── utils.py          # Shared helpers (separator, timestamp)
+├── config.json       # Dependency definitions
+├── setup.py          # Auto dependency checker and installer
 ├── .env.example      # Credential template (never commit .env)
 ├── .gitignore
 └── logs/             # Auto-generated timestamped log files
 ```
 
-**`health_check.py`** — Entry point. Orchestrates the full workflow in four steps, contains no logic of its own.
+**`health_check.py`** — Entry point. Validates dependencies first, then orchestrates the full workflow in four steps.
 
 ```python
-results          = run_all_checks()       # 1. measure
-report, overall  = build_report(results)  # 2. build report
-save_log(report)                          # 3. save log
-if WARNING → cleanup + send_alert_email() # 4. act
+run_setup()                              # 0. validate dependencies
+results          = run_all_checks()      # 1. measure
+report, overall  = build_report(results) # 2. build report
+save_log(report)                         # 3. save log
+if WARNING → cleanup + send_alert_email  # 4. act
 ```
+
+**`config.json`** — Single source of truth for all third-party dependencies.
+
+```json
+{
+  "dependencies": [
+    { "import_name": "psutil",  "install_name": "psutil",       "version": ">=5.9.0" },
+    { "import_name": "dotenv",  "install_name": "python-dotenv","version": ">=1.0.0" }
+  ]
+}
+```
+
+**`setup.py`** — Reads `config.json`, checks if each package is installed, and installs any that are missing via pip. Exits with an error if installation fails.
 
 **`checkers.py`** — Runs all health checks and returns structured results.
 
@@ -101,14 +127,32 @@ if WARNING → cleanup + send_alert_email() # 4. act
 | `analyze_disk()` | Disk WARNING | Top 5 largest items in home directory |
 | `analyze_network()` | Network WARNING | DNS → interfaces → internet reachability |
 
-**`remediation.py`** — Triggered only when OVERALL status is WARNING. Takes action without waiting for a technician.
+**`remediation.py`** — Triggered only when OVERALL status is WARNING. Handles temp file cleanup with admin-aware logic and sends a Gmail alert.
 
 | Function | What it does |
 |---|---|
-| `cleanup_temp_files()` | Deletes temp files from OS temp directories |
-| `send_alert_email()` | Sends Gmail alert with full report and cleanup summary |
+| `is_admin()` | Checks for administrator privileges (Windows UAC / Unix root) |
+| `_get_temp_paths(admin)` | Returns temp paths based on privilege level |
+| `_clean_directory(path)` | Cleans a single directory — distinguishes locked files from real errors |
+| `cleanup_temp_files()` | Orchestrates cleanup across all temp paths, prompts admin relaunch if needed |
+| `send_alert_email()` | Sends Gmail alert with full report and cleanup summary (UTF-8 encoded) |
 
-**`reporter.py`** — Assembles the final report and saves the log.
+Temp file cleanup behavior:
+
+| Privilege | Directories cleaned |
+|---|---|
+| Admin | User temp + `C:\Windows\Temp` (Windows) / `/tmp` + `~/.cache` (macOS/Linux) |
+| No admin | User temp only — prompts to relaunch as admin for system temp |
+
+File handling during cleanup:
+
+| Case | Behavior |
+|---|---|
+| Deleted successfully | Counted in `deleted`, size added to `freed_mb` |
+| Locked by another process (WinError 32) | Counted in `locked` — skipped safely, not an error |
+| Other OS error | Counted in `errors` |
+
+**`reporter.py`** — Assembles the final report from all check and analysis results, then saves it as a timestamped log.
 
 **`utils.py`** — Shared helpers used across all modules (`separator()`, `timestamp()`).
 
@@ -119,8 +163,11 @@ if WARNING → cleanup + send_alert_email() # 4. act
 | Diagnosis time | 10–15 min manual | Under 60 sec automated |
 | Root cause | Found manually | Surfaced automatically |
 | Temp file cleanup | Done manually | Triggered automatically on WARNING |
+| System temp cleanup | Requires manual admin steps | Auto-detected, UAC prompt on demand |
+| Locked files | Caused errors | Identified and skipped safely |
 | Documentation | Not saved | Timestamped log auto-saved |
 | Alert | Phone call / chat | Gmail alert auto-sent |
+| Dependencies | Manual pip install | Auto-checked and installed via config.json |
 | OS support | Single platform | Windows, macOS, Linux |
 
 ---
@@ -129,6 +176,12 @@ if WARNING → cleanup + send_alert_email() # 4. act
 
 Normal state:
 ```
+Checking dependencies...
+
+  [OK]      Already installed : psutil, python-dotenv
+
+Running system health check...
+
 ----------------------------------------
   SYSTEM HEALTH CHECK REPORT
   2026-03-23 14:32:01
@@ -150,36 +203,21 @@ Normal state:
 ----------------------------------------
 ```
 
-WARNING with automatic root cause analysis:
+WARNING with cleanup and alert:
 ```
 ----------------------------------------
-  SYSTEM HEALTH CHECK REPORT
-  2026-03-23 14:35:20
-  OS : Windows 11
-----------------------------------------
-[CPU]
-  Usage   : 91.0%  (8 cores)  [WARNING]
-  >> Root cause analysis: top CPU-consuming processes
-     PID 4821   chrome.exe                47.3%
-     PID 1204   python.exe                18.1%
-     PID 3390   Teams.exe                 12.4%
-     PID 992    SearchIndexer.exe          8.2%
-     PID 512    svchost.exe                3.1%
-[RAM]
-  Used    : 14.1 GB / 16.0 GB  (88%)  [WARNING]
-  >> Root cause analysis: top RAM-consuming processes
-     PID 4821   chrome.exe                4821.3 MB
-     PID 3390   Teams.exe                 1203.7 MB
-     PID 1204   python.exe                 512.2 MB
-     PID 788    explorer.exe               204.1 MB
-     PID 512    svchost.exe                189.6 MB
-----------------------------------------
   OVERALL : WARNING — check items above
+----------------------------------------
 
 OVERALL WARNING detected — running cleanup and sending alert...
-  [CLEANUP] Done — 142 items deleted, 380.4 MB freed, 3 errors skipped.
+
+  [CLEANUP] Admin privileges : No
+  [CLEANUP] C:\Users\username\AppData\Local\Temp    3 deleted, 20 locked (in use), 45.2 MB freed
+
+  [CLEANUP] System temp (C:\Windows\Temp) was skipped — requires admin privileges.
+  [CLEANUP] Relaunch as administrator to clean system temp? [y/N]:
+
   [EMAIL] Alert sent successfully.
-----------------------------------------
 ```
 
 ---
@@ -187,9 +225,9 @@ OVERALL WARNING detected — running cleanup and sending alert...
 ## Requirements
 
 - Python 3.7+
-- [psutil](https://pypi.org/project/psutil/)
-- [python-dotenv](https://pypi.org/project/python-dotenv/)
+- Dependencies are defined in `config.json` and installed automatically on first run.
 
+To install manually:
 ```bash
 pip install psutil python-dotenv
 ```
@@ -204,12 +242,7 @@ git clone https://github.com/username/sys-health-check.git
 cd sys-health-check
 ```
 
-**2. Install dependencies**
-```bash
-pip install psutil python-dotenv
-```
-
-**3. Configure credentials**
+**2. Configure credentials**
 
 Copy `.env.example` to `.env` and fill in your Gmail details:
 ```
@@ -221,20 +254,22 @@ RECEIVER_EMAIL=receiver_email@gmail.com
 > Gmail requires an [App Password](https://support.google.com/accounts/answer/185833) — not your regular password.
 > Go to Google Account → Security → App Passwords to generate one.
 
-**4. Run**
+**3. Run**
 ```bash
 python health_check.py
 ```
+
+Dependencies are checked and installed automatically on first run.
 
 ---
 
 ## Cross-Platform Support
 
-| OS | Disk path | Temp directories | Services monitored |
-|---|---|---|---|
-| Windows | C:\ | %TEMP%, %TMP%, C:\Windows\Temp | Spooler, wuauserv |
-| macOS | / | /tmp, ~/.cache | com.apple.metadata.mds |
-| Linux | / | /tmp, ~/.cache | cron, ssh |
+| OS | Disk path | User temp | System temp (admin only) | Services monitored |
+|---|---|---|---|---|
+| Windows | C:\ | %TEMP% | C:\Windows\Temp | Spooler, wuauserv |
+| macOS | / | ~/.cache | /tmp | com.apple.metadata.mds |
+| Linux | / | ~/.cache | /tmp | cron, ssh |
 
 ---
 
@@ -243,7 +278,10 @@ python health_check.py
 - Modular Python design (single-responsibility per module)
 - IT support troubleshooting logic — detect → analyze → remediate → alert
 - Automated root cause analysis (`psutil`)
+- Admin privilege detection and graceful degradation
+- OS-level error handling (WinError 32 file lock distinction)
 - Cross-platform compatibility (Windows / macOS / Linux)
+- Dependency management via `config.json` + auto-installer
 - Secure credential handling via `.env` + `.gitignore`
 - Structured log generation
-- Gmail SMTP integration
+- Gmail SMTP integration (UTF-8 encoded)
