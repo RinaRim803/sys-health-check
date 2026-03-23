@@ -8,7 +8,8 @@ if not run_setup():
 
 from checkers import run_all_checks
 from reporter import build_report, save_log
-from remediation import cleanup_temp_files, send_alert_email
+from remediation import cleanup_temp_files
+from email_alert import send_alert_email
 
 
 def main():
@@ -23,7 +24,7 @@ def main():
 
     # 3. Save log
     log_path = save_log(report)
-    print(f"\nLog saved → {log_path}")
+    print(f"\nLog saved -> {log_path}")
 
     # 4. If WARNING — clean temp files and send alert email
     if overall.startswith("WARNING"):
@@ -34,7 +35,8 @@ def main():
         print(
             f"  [CLEANUP] Done — {cleanup_summary['deleted']} items deleted, "
             f"{cleanup_summary['freed_mb']:.1f} MB freed, "
-            f"{cleanup_summary['errors']} errors skipped."
+            f"{cleanup_summary['locked']} locked, "
+            f"{cleanup_summary['errors']} errors."
         )
 
         send_alert_email(report, cleanup_summary)
