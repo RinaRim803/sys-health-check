@@ -1,3 +1,11 @@
+import sys
+from setup import run_setup
+
+# Verify all dependencies before importing third-party modules
+if not run_setup():
+    print("Dependency check failed. Exiting.")
+    sys.exit(1)
+
 from checkers import run_all_checks
 from reporter import build_report, save_log
 from remediation import cleanup_temp_files, send_alert_email
