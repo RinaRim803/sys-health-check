@@ -18,10 +18,10 @@ The technician manually checks Task Manager, disk usage, and network status one 
 
 Every ticket like this follows the same repetitive steps:
 
-1. Open Task Manager → check CPU and RAM manually
-2. Open File Explorer → check disk usage manually
-3. Run `ping` / `ipconfig` → check network manually
-4. Check each service → one by one
+1. Open Task Manager — check CPU and RAM manually
+2. Open File Explorer — check disk usage manually
+3. Run `ping` / `ipconfig` — check network manually
+4. Check each service — one by one
 
 There is no quick way to get a full system snapshot *and* identify the root cause at the same time. Time is wasted on diagnosis instead of resolution.
 
@@ -44,28 +44,31 @@ python health_check.py
 
 ```
 python health_check.py
-        │
-        ▼
+        |
+        v
   setup.py                Validate dependencies from config.json
-  (auto-install if missing)
-        │
-        ▼
+  (auto-install missing)
+        |
+        v
   checkers.py             Measure CPU / RAM / Disk / Network / Services
-        │
-        ▼
-  reporter.py             Build report — if WARNING → call analyzers.py
-        │
-        ├─ OK ──────────▶  Print report + save log
-        │
-        └─ WARNING ─────▶  Print report + save log
-                               │
-                               ▼
+        |
+        v
+  reporter.py             Build report — if WARNING -> call analyzers.py
+        |
+        +-- OK ---------->  Print report + save log
+        |
+        +-- WARNING ------->  Print report + save log
+                               |
+                               v
                         remediation.py
-                        ├─ Check admin privileges
-                        │   ├─ Admin    : clean user temp + system temp
-                        │   └─ No admin : clean user temp only
-                        │               prompt to relaunch as admin
-                        └─ Send Gmail alert
+                        | Check admin privileges
+                        |   +-- Admin    : clean user temp + system temp
+                        |   +-- No admin : clean user temp only
+                        |                 prompt to relaunch as admin
+                        |
+                        v
+                        email_alert.py
+                        | Send Gmail alert with report + cleanup summary
 ```
 
 ### Module breakdown
@@ -75,7 +78,8 @@ sys-health-check/
 ├── health_check.py   # Entry point — orchestrates the full workflow
 ├── checkers.py       # Measures CPU, RAM, Disk, Network, Services
 ├── analyzers.py      # Identifies root cause when WARNING is detected
-├── remediation.py    # Cleans temp files and sends Gmail alert
+├── remediation.py    # Temp file cleanup with admin-aware logic
+├── email_alert.py    # Gmail alert — standalone, single responsibility
 ├── reporter.py       # Builds the report and saves the log
 ├── utils.py          # Shared helpers (separator, timestamp)
 ├── config.json       # Dependency definitions
@@ -85,14 +89,16 @@ sys-health-check/
 └── logs/             # Auto-generated timestamped log files
 ```
 
-**`health_check.py`** — Entry point. Validates dependencies first, then orchestrates the full workflow in four steps.
+**`health_check.py`** — Entry point. Validates dependencies first, then orchestrates the workflow.
 
 ```python
 run_setup()                              # 0. validate dependencies
 results          = run_all_checks()      # 1. measure
 report, overall  = build_report(results) # 2. build report
 save_log(report)                         # 3. save log
-if WARNING → cleanup + send_alert_email  # 4. act
+if WARNING:                              # 4. act
+    cleanup_temp_files()
+    send_alert_email()
 ```
 
 **`config.json`** — Single source of truth for all third-party dependencies.
@@ -100,8 +106,8 @@ if WARNING → cleanup + send_alert_email  # 4. act
 ```json
 {
   "dependencies": [
-    { "import_name": "psutil",  "install_name": "psutil",       "version": ">=5.9.0" },
-    { "import_name": "dotenv",  "install_name": "python-dotenv","version": ">=1.0.0" }
+    { "import_name": "psutil",  "install_name": "psutil",        "version": ">=5.9.0" },
+    { "import_name": "dotenv",  "install_name": "python-dotenv", "version": ">=1.0.0" }
   ]
 }
 ```
@@ -112,9 +118,9 @@ if WARNING → cleanup + send_alert_email  # 4. act
 
 | Function | What it checks | WARNING threshold |
 |---|---|---|
-| `check_cpu()` | Usage %, core count | ≥ 80% |
-| `check_ram()` | Used / total GB | ≥ 80% |
-| `check_disk()` | Used / total GB | ≥ 85% |
+| `check_cpu()` | Usage %, core count | >= 80% |
+| `check_ram()` | Used / total GB | >= 80% |
+| `check_disk()` | Used / total GB | >= 85% |
 | `check_network()` | DNS resolution to google.com | Unreachable |
 | `check_services()` | Key OS services running status | Not running |
 
@@ -125,17 +131,16 @@ if WARNING → cleanup + send_alert_email  # 4. act
 | `analyze_cpu()` | CPU WARNING | Top 5 CPU-consuming processes (PID, name, %) |
 | `analyze_ram()` | RAM WARNING | Top 5 memory-consuming processes (PID, name, MB) |
 | `analyze_disk()` | Disk WARNING | Top 5 largest items in home directory |
-| `analyze_network()` | Network WARNING | DNS → interfaces → internet reachability |
+| `analyze_network()` | Network WARNING | DNS -> interfaces -> internet reachability |
 
-**`remediation.py`** — Triggered only when OVERALL status is WARNING. Handles temp file cleanup with admin-aware logic and sends a Gmail alert.
+**`remediation.py`** — Triggered only when OVERALL status is WARNING. Handles temp file cleanup with admin-aware logic.
 
 | Function | What it does |
 |---|---|
 | `is_admin()` | Checks for administrator privileges (Windows UAC / Unix root) |
 | `_get_temp_paths(admin)` | Returns temp paths based on privilege level |
-| `_clean_directory(path)` | Cleans a single directory — distinguishes locked files from real errors |
-| `cleanup_temp_files()` | Orchestrates cleanup across all temp paths, prompts admin relaunch if needed |
-| `send_alert_email()` | Sends Gmail alert with full report and cleanup summary (UTF-8 encoded) |
+| `_clean_directory(path)` | Cleans a single directory, distinguishes locked files from real errors |
+| `cleanup_temp_files()` | Orchestrates cleanup, prompts admin relaunch if needed |
 
 Temp file cleanup behavior:
 
@@ -149,8 +154,17 @@ File handling during cleanup:
 | Case | Behavior |
 |---|---|
 | Deleted successfully | Counted in `deleted`, size added to `freed_mb` |
-| Locked by another process (WinError 32) | Counted in `locked` — skipped safely, not an error |
+| Locked by another process (WinError 32) | Counted in `locked` — skipped safely |
 | Other OS error | Counted in `errors` |
+
+**`email_alert.py`** — Standalone Gmail alert module. Single responsibility: compose and send the alert email.
+
+| Function | What it does |
+|---|---|
+| `_build_email_body()` | Composes email body from report and cleanup summary |
+| `send_alert_email()` | Sends Gmail alert via SMTP SSL using EmailMessage API |
+
+Uses Python's `EmailMessage` (modern API) which handles encoding natively. Credentials loaded from `.env` — never hardcoded.
 
 **`reporter.py`** — Assembles the final report from all check and analysis results, then saves it as a timestamped log.
 
@@ -160,11 +174,11 @@ File handling during cleanup:
 
 | | Before | After |
 |---|---|---|
-| Diagnosis time | 10–15 min manual | Under 60 sec automated |
+| Diagnosis time | 10-15 min manual | Under 60 sec automated |
 | Root cause | Found manually | Surfaced automatically |
 | Temp file cleanup | Done manually | Triggered automatically on WARNING |
 | System temp cleanup | Requires manual admin steps | Auto-detected, UAC prompt on demand |
-| Locked files | Caused errors | Identified and skipped safely |
+| Locked files | Caused confusing errors | Identified and skipped safely |
 | Documentation | Not saved | Timestamped log auto-saved |
 | Alert | Phone call / chat | Gmail alert auto-sent |
 | Dependencies | Manual pip install | Auto-checked and installed via config.json |
@@ -201,12 +215,29 @@ Running system health check...
 ----------------------------------------
   OVERALL : ALL SYSTEMS OK
 ----------------------------------------
+
+Log saved -> C:\...\logs\health_20260323_143201.log
 ```
 
-WARNING with cleanup and alert:
+WARNING with root cause analysis, cleanup, and alert:
 ```
 ----------------------------------------
-  OVERALL : WARNING — check items above
+[CPU]
+  Usage   : 91.0%  (8 cores)  [WARNING]
+  >> Root cause analysis: top CPU-consuming processes
+     PID 4821   chrome.exe                47.3%
+     PID 1204   python.exe                18.1%
+     PID 3390   Teams.exe                 12.4%
+     PID 992    SearchIndexer.exe          8.2%
+     PID 512    svchost.exe                3.1%
+[RAM]
+  Used    : 14.1 GB / 16.0 GB  (88%)  [WARNING]
+  >> Root cause analysis: top RAM-consuming processes
+     PID 4821   chrome.exe                4821.3 MB
+     PID 3390   Teams.exe                 1203.7 MB
+     PID 1204   python.exe                 512.2 MB
+----------------------------------------
+  OVERALL : WARNING - check items above
 ----------------------------------------
 
 OVERALL WARNING detected — running cleanup and sending alert...
@@ -252,7 +283,8 @@ RECEIVER_EMAIL=receiver_email@gmail.com
 ```
 
 > Gmail requires an [App Password](https://support.google.com/accounts/answer/185833) — not your regular password.
-> Go to Google Account → Security → App Passwords to generate one.
+> Go to Google Account -> Security -> App Passwords to generate one.
+> When copying the app password, type it manually without spaces to avoid hidden non-breaking space characters.
 
 **3. Run**
 ```bash
@@ -276,7 +308,7 @@ Dependencies are checked and installed automatically on first run.
 ## Skills Demonstrated
 
 - Modular Python design (single-responsibility per module)
-- IT support troubleshooting logic — detect → analyze → remediate → alert
+- IT support troubleshooting logic — detect -> analyze -> remediate -> alert
 - Automated root cause analysis (`psutil`)
 - Admin privilege detection and graceful degradation
 - OS-level error handling (WinError 32 file lock distinction)
@@ -284,4 +316,4 @@ Dependencies are checked and installed automatically on first run.
 - Dependency management via `config.json` + auto-installer
 - Secure credential handling via `.env` + `.gitignore`
 - Structured log generation
-- Gmail SMTP integration (UTF-8 encoded)
+- Gmail SMTP integration (`EmailMessage` API)
