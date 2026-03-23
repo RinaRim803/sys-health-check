@@ -71,7 +71,7 @@ def _get_overall(results: dict) -> str:
         ]
         + [s["status"] for s in results["services"]]
     )
-    return "WARNING — check items above" if "WARNING" in all_statuses else "ALL SYSTEMS OK"
+    return "WARNING - check items above" if "WARNING" in all_statuses else "ALL SYSTEMS OK"
 
 
 def build_report(results: dict) -> tuple[str, str]:
