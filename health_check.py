@@ -1,17 +1,17 @@
-import sys
-from setup import run_setup
-
-# Verify all dependencies before importing third-party modules
-if not run_setup():
-    print("Dependency check failed. Exiting.")
-    sys.exit(1)
-
 from checkers import run_all_checks
 from reporter import build_report, save_log
 from remediation import cleanup_temp_files
 from email_alert import send_alert_email
 
 
+# IT Ticket System integration — optional, fails gracefully if server is not running
+try:
+    from integrations.health_check_client import create_tickets_for_warnings
+    TICKET_SYSTEM_ENABLED = True
+except ImportError:
+    TICKET_SYSTEM_ENABLED = False
+
+    
 def main():
     print("\nRunning system health check...\n")
 
@@ -40,6 +40,13 @@ def main():
         )
 
         send_alert_email(report, cleanup_summary)
+        
+        # Auto-create tickets in IT Ticket System for each WARNING item
+        if TICKET_SYSTEM_ENABLED:
+            print("\n  [TICKET] Creating tickets for WARNING items...")
+            create_tickets_for_warnings(results, report)
+        else:
+            print("\n  [TICKET] Skipped — integrations module not found.")
 
     print()
 
