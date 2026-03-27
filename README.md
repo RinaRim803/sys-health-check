@@ -277,7 +277,7 @@ The integration is **optional and non-blocking** — if the IT Ticket System ser
 **Install dependencies:**
 ```bash
 pip install -r requirements.txt
-
+```
 ---
 
 ## Setup
