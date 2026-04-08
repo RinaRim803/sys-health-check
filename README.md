@@ -6,6 +6,17 @@ A cross-platform IT support automation tool that diagnoses system health, identi
 
 No manual digging. No wasted time. Just run it and get answers.
 
+## 🚧 Current progress
+This repo is under active development for data standardization and monitoring.
+
+- **Milestone: JSON Schema Standardization**
+  - [ ] Design standard JSON schema for system metrics (CPU, RAM, Disk, Network).
+  - [ ] Refactor CPU/RAM collectors to use the new schema.
+  - [ ] Refactor Disk/Network collectors to use the new schema.
+  - [ ] Write unit tests to validate JSON–schema compliance.
+
+Check the `Issues` tab for more details.
+
 ---
 
 ## 📋 Scenario & Problem Solving
