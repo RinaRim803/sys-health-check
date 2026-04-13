@@ -71,19 +71,31 @@ def check_services():
         })
     return results
 
+def get_powershell_stats():
+    """Run PowerShell command to get system stats on Windows."""
+    try:
+        process = subprocess.run(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "./check_system.ps1"],
+            capture_output=True, text=True, check=True
+        )
+        check =  json.loads(process.stdout)
+        print(f"[*] PowerShell check results: {check}")
+        return {}
+    except Exception as e:
+        return {"error": str(e), "status": "WARNING"}
 
 def run_all_checks():
     
     """Run all checks and return results as a dict."""
     current_os = platform.system()
     print(f"[*] Currently detected OS: {current_os}")
-    # if current_os == "Windows":
-    #     # Run PowerShell for Windows 
-    #     return get_powershell_stats()
-    # else:
+    if current_os == "Windows":
+        # Run PowerShell for Windows 
+        return get_powershell_stats()
+    else:
 
         # Linux나 macOS라면 기존 psutil 로직 실행
-    return {
+        return {
         "cpu":      check_cpu(),
         "ram":      check_ram(),
         "disk":     check_disk(),
