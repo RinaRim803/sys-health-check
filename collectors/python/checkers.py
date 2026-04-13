@@ -1,101 +1,88 @@
-import psutil
+"""
+collectors/python/checkers.py
+System health check functions for macOS and Linux.
+
+Thresholds and service targets are loaded from config.json —
+no code changes needed to tune check behavior.
+"""
+
 import platform
 import socket
-import subprocess
-import json
+import sys
+import os
+import psutil
+
+# config.py is at the project root — two levels up from this file
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+from config import get_thresholds, get_services, get_network_config
 
 
-def check_cpu():
+def check_cpu() -> dict:
     """Check CPU usage and core count."""
+    cfg    = get_thresholds()
     usage  = psutil.cpu_percent(interval=1)
     count  = psutil.cpu_count()
-    status = "WARNING" if usage >= 80 else "OK"
+    status = "WARNING" if usage >= cfg["cpu_warning_pct"] else "OK"
     return {"usage": usage, "count": count, "status": status}
 
 
-def check_ram():
+def check_ram() -> dict:
     """Check RAM usage."""
+    cfg      = get_thresholds()
     ram      = psutil.virtual_memory()
     used_gb  = ram.used  / (1024 ** 3)
     total_gb = ram.total / (1024 ** 3)
     percent  = ram.percent
-    status   = "WARNING" if percent >= 80 else "OK"
+    status   = "WARNING" if percent >= cfg["memory_warning_pct"] else "OK"
     return {"used_gb": used_gb, "total_gb": total_gb, "percent": percent, "status": status}
 
 
-def check_disk():
+def check_disk() -> dict:
     """Check disk usage for the root/system drive."""
+    cfg      = get_thresholds()
     path     = "C:\\" if platform.system() == "Windows" else "/"
     disk     = psutil.disk_usage(path)
     used_gb  = disk.used  / (1024 ** 3)
     total_gb = disk.total / (1024 ** 3)
     percent  = disk.percent
-    status   = "WARNING" if percent >= 85 else "OK"
+    status   = "WARNING" if percent >= cfg["disk_warning_pct"] else "OK"
     return {"used_gb": used_gb, "total_gb": total_gb, "percent": percent, "status": status}
 
 
-def check_network():
+def check_network() -> dict:
     """Check basic network connectivity by resolving a public DNS address."""
+    cfg = get_network_config()
     try:
-        socket.setdefaulttimeout(3)
-        socket.gethostbyname("google.com")
+        socket.setdefaulttimeout(cfg["dns_timeout_sec"])
+        socket.gethostbyname(cfg["dns_check_host"])
         return {"connected": True, "status": "OK"}
     except socket.error:
         return {"connected": False, "status": "WARNING"}
 
 
-def check_services():
+def check_services() -> dict:
     """Check whether key system services are running."""
-    targets = {
-        "Windows": ["Spooler", "wuauserv"],
-        "Darwin":  ["com.apple.metadata.mds"],
-        "Linux":   ["cron", "ssh"],
-    }
-    os_name       = platform.system()
-    service_names = targets.get(os_name, [])
+    cfg         = get_services()
+    os_name     = platform.system()
+    svc_targets = cfg.get(os_name, [])
 
     results = []
-    for svc in service_names:
-        found = False
-        for proc in psutil.process_iter(["name"]):
-            try:
-                if svc.lower() in proc.info["name"].lower():
-                    found = True
-                    break
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+    for svc in svc_targets:
+        found = any(
+            svc.lower() in (proc.info.get("name") or "").lower()
+            for proc in psutil.process_iter(["name"])
+        )
         results.append({
             "name":    svc,
             "running": found,
-            "status":  "OK" if found else "WARNING"
+            "status":  "OK" if found else "WARNING",
         })
     return results
 
-def get_powershell_stats():
-    """Run PowerShell command to get system stats on Windows."""
-    try:
-        process = subprocess.run(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", "./check_system.ps1"],
-            capture_output=True, text=True, check=True
-        )
-        check =  json.loads(process.stdout)
-        print(f"[*] PowerShell check results: {check}")
-        return {}
-    except Exception as e:
-        return {"error": str(e), "status": "WARNING"}
 
-def run_all_checks():
-    
+def run_all_checks() -> dict:
     """Run all checks and return results as a dict."""
-    current_os = platform.system()
-    print(f"[*] Currently detected OS: {current_os}")
-    if current_os == "Windows":
-        # Run PowerShell for Windows 
-        return get_powershell_stats()
-    else:
-
-        # Linux나 macOS라면 기존 psutil 로직 실행
-        return {
+    return {
         "cpu":      check_cpu(),
         "ram":      check_ram(),
         "disk":     check_disk(),
