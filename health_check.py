@@ -15,17 +15,20 @@ except ImportError:
 def get_collector():
     """
     Select the appropriate collector based on the current OS.
-    Returns the collect() function from the correct collector module.
 
-    Windows → powershell_collector  (calls collect_health.ps1)
-    macOS / Linux → python_collector (calls checkers.py via psutil)
+    Windows   → collectors/powershell/collector.py
+                calls collect_health.ps1 (sibling in same folder)
+
+    macOS     → collectors/python/collector.py
+    Linux     → collectors/python/collector.py
+                both call checkers.py (sibling in same folder)
     """
     os_name = platform.system()
     if os_name == "Windows":
-        from collectors.powershell_collector import collect
+        from collectors.powershell.collector import collect
         print("  [COLLECTOR] Windows detected — using PowerShell collector\n")
     else:
-        from collectors.python_collector import collect
+        from collectors.python.collector import collect
         print(f"  [COLLECTOR] {os_name} detected — using Python collector\n")
     return collect
 
@@ -60,10 +63,8 @@ def main():
 
         send_alert_email(report, cleanup_summary)
 
-        # Auto-create tickets in IT Ticket System for each WARNING item
         if TICKET_SYSTEM_ENABLED:
             print("\n  [TICKET] Creating tickets for WARNING items...")
-            # Pass v1.1 schema checks dict — client reads status from schema fields
             create_tickets_for_warnings(data["checks"], report)
         else:
             print("\n  [TICKET] Skipped — integrations module not found.")

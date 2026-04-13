@@ -1,11 +1,11 @@
 """
-collectors/python_collector.py
+collectors/python/collector.py
 Python collector for macOS and Linux.
 
-Calls the existing checkers.py functions and converts their output
+Calls checkers.py (sibling in this package) and converts the output
 into the canonical v1.1 JSON schema.
 
-checkers.py is NOT modified — this module owns the translation layer.
+checkers.py is NOT modified — this module owns the translation layer only.
 
 Public interface:
     collect() -> dict   # returns v1.1 schema-compliant dict
@@ -13,19 +13,21 @@ Public interface:
 
 import platform
 import socket
+import sys
+import os
 from datetime import datetime, timezone
 
-from checkers import run_all_checks
+# checkers.py is a sibling in the same package (collectors/python/)
+from collectors.python.checkers import run_all_checks
 
 
-# ── Status thresholds (mirrors checkers.py logic) ─────────────────────────────
-_CPU_WARN    = 80
-_MEM_WARN    = 80
-_DISK_WARN   = 85
+# ── Thresholds (mirrors checkers.py logic) ────────────────────────────────────
+_CPU_WARN  = 80
+_MEM_WARN  = 80
+_DISK_WARN = 85
 
 
 def _status(condition: bool) -> str:
-    """Return 'WARNING' if condition is True, else 'OK'."""
     return "WARNING" if condition else "OK"
 
 
@@ -42,7 +44,7 @@ def _build_metadata() -> dict:
 
 
 def _build_cpu(raw: dict) -> dict:
-    usage = raw["usage"]
+    usage  = raw["usage"]
     status = _status(usage >= _CPU_WARN)
     return {
         "usage_pct":  round(usage, 1),
@@ -53,7 +55,7 @@ def _build_cpu(raw: dict) -> dict:
 
 
 def _build_memory(raw: dict) -> dict:
-    pct = raw["percent"]
+    pct    = raw["percent"]
     status = _status(pct >= _MEM_WARN)
     return {
         "usage_pct": round(pct, 1),
@@ -65,7 +67,7 @@ def _build_memory(raw: dict) -> dict:
 
 
 def _build_disk(raw: dict) -> dict:
-    pct = raw["percent"]
+    pct    = raw["percent"]
     status = _status(pct >= _DISK_WARN)
     return {
         "usage_pct": round(pct, 1),
@@ -100,7 +102,6 @@ def _build_network(raw: dict) -> dict:
 
 
 def _build_summary(checks: dict) -> dict:
-    """Count WARNING statuses across all checks."""
     statuses = [
         checks["system_resources"]["cpu"]["status"],
         checks["system_resources"]["memory"]["status"],
@@ -108,9 +109,11 @@ def _build_summary(checks: dict) -> dict:
         checks["network"]["status"],
     ] + [svc["status"] for svc in checks["services"]]
 
-    alert_count   = statuses.count("WARNING")
-    overall       = "WARNING" if alert_count > 0 else "OK"
-    return {"overall_status": overall, "alert_count": alert_count}
+    alert_count = statuses.count("WARNING")
+    return {
+        "overall_status": "WARNING" if alert_count > 0 else "OK",
+        "alert_count":    alert_count,
+    }
 
 
 def collect() -> dict:
