@@ -13,6 +13,11 @@ This repo is under active development for data standardization and monitoring.
   - [ ] Build the PowerShell collector (collect_health.ps1):
     - [ ] Reimplement system checks previously handled by Python psutil using PowerShell cmdlets.
     - [ ] Write unit tests to validate JSON–schema compliance.
+  - [ ] Implement OS detection logic:
+    - [ ] In the Python main entry point, use platform.system() to detect Windows.
+    - [ ] If the OS is Windows, call the PowerShell collector through subprocess; otherwise, use native Python functions.
+
+
 
 Check the `Issues` tab for more details.
 
