@@ -61,8 +61,8 @@ def _format_network(network: dict) -> list:
     return lines
 
 
-def _format_services(services: list) -> list:
-    lines = ["[SERVICES]"]
+def _format_services(services: list, os_type: str) -> list:
+    lines = [f"[SERVICES]  ({os_type})"]
     if services:
         for svc in services:
             state = "Running" if svc["running"] else "Not found"
@@ -107,7 +107,7 @@ def build_report(data: dict) -> tuple[str, str]:
     lines.extend(_format_memory(res["memory"]))
     lines.extend(_format_disk(res["disk"]))
     lines.extend(_format_network(checks["network"]))
-    lines.extend(_format_services(checks["services"]))
+    lines.extend(_format_services(checks["services"], meta["os_type"]))
 
     lines.append(separator())
     overall = _get_overall(data)
