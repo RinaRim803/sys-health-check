@@ -1,6 +1,8 @@
 import psutil
 import platform
 import socket
+import subprocess
+import json
 
 
 def check_cpu():
@@ -71,7 +73,16 @@ def check_services():
 
 
 def run_all_checks():
+    
     """Run all checks and return results as a dict."""
+    current_os = platform.system()
+    print(f"[*] Currently detected OS: {current_os}")
+    # if current_os == "Windows":
+    #     # Run PowerShell for Windows 
+    #     return get_powershell_stats()
+    # else:
+
+        # Linux나 macOS라면 기존 psutil 로직 실행
     return {
         "cpu":      check_cpu(),
         "ram":      check_ram(),
