@@ -1,0 +1,67 @@
+{
+  "$schema_version": "1.1",
+  "$description": "Canonical data contract for sys-health-check collectors. All collectors (Python, PowerShell, Bash) must produce output that matches this structure. Field names and status values must be identical across all platforms.",
+
+  "report_metadata": {
+    "timestamp":      "ISO 8601 — e.g. 2026-04-07T18:30:45Z",
+    "hostname":       "string — machine name",
+    "os_type":        "Windows | macOS | Linux",
+    "os_version":     "string — e.g. Windows 11, Ubuntu 22.04",
+    "executor":       "Python_Collector_v1 | PowerShell_Collector_v1 | Bash_Collector_v1",
+    "schema_version": "1.1"
+  },
+
+  "summary": {
+    "overall_status": "OK | WARNING",
+    "alert_count":    "integer — number of checks with WARNING status"
+  },
+
+  "checks": {
+    "system_resources": {
+      "cpu": {
+        "usage_pct":  "float   — 0.0 to 100.0",
+        "core_count": "integer — logical core count",
+        "status":     "OK | WARNING",
+        "message":    "string  — human-readable description"
+      },
+      "memory": {
+        "usage_pct":  "float",
+        "used_gb":    "float",
+        "total_gb":   "float",
+        "status":     "OK | WARNING",
+        "message":    "string"
+      },
+      "disk": {
+        "usage_pct":  "float",
+        "used_gb":    "float",
+        "total_gb":   "float",
+        "status":     "OK | WARNING",
+        "message":    "string"
+      }
+    },
+
+    "services": [
+      {
+        "name":    "string  — service name",
+        "running": "boolean",
+        "status":  "OK | WARNING",
+        "message": "string — optional"
+      }
+    ],
+
+    "network": {
+      "connected": "boolean",
+      "status":    "OK | WARNING",
+      "message":   "string"
+    }
+  },
+
+  "$thresholds": {
+    "$note":   "Reference only — actual thresholds defined in config.json",
+    "cpu":     "WARNING if usage_pct >= 80",
+    "memory":  "WARNING if usage_pct >= 80",
+    "disk":    "WARNING if usage_pct >= 85",
+    "network": "WARNING if connected == false",
+    "service": "WARNING if running == false"
+  }
+}
