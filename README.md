@@ -6,20 +6,6 @@ A cross-platform IT support automation tool that diagnoses system health, identi
 
 No manual digging. No wasted time. Just run it and get answers.
 
-## 🚧 Current progress
-This repo is under active development for data standardization and monitoring.
-- **Milestone: PowerShell System Health Integration**
-  - [ ] Introduce PowerShell for Windows environments and connect it with Python
-  - [ ] Build the PowerShell collector (collect_health.ps1):
-    - [ ] Reimplement system checks previously handled by Python psutil using PowerShell cmdlets.
-    - [ ] Write unit tests to validate JSON–schema compliance.
-  - [ ] Implement OS detection logic:
-    - [ ] In the Python main entry point, use platform.system() to detect Windows.
-    - [ ] If the OS is Windows, call the PowerShell collector through subprocess; otherwise, use native Python functions.
-
-
-
-Check the `Issues` tab for more details.
 
 ---
 
@@ -45,24 +31,31 @@ There is no quick way to get a full system snapshot *and* identify the root caus
 python health_check.py
 ```
 
-- Checks CPU, RAM, Disk, Network, and Services in a single run
+- Detects the current OS and selects the appropriate collector automatically
+- **Windows**: collects via PowerShell (`Collectors.psm1`) for native WMI accuracy
+- **macOS / Linux**: collects via Python (`psutil`)
+- Both collectors output a canonical v1.1 JSON schema — reporter handles both identically
 - Automatically identifies root cause when a WARNING is detected
 - Cleans up temporary files if the system is under stress
 - Sends a Gmail alert with the full report when overall status is WARNING
-- Auto-creates tickets in IT Ticket System for each WARNING item
+- **Auto-creates tickets in IT Ticket System for each WARNING item**
 - Saves a timestamped log for every run
+- All thresholds and service targets controlled via `config.json` — no code changes needed
 
 ## 📌 Performance Impact
 
+
 | Category | Manual Process (Before) | **Automated Solution (After)** |
 | :--- | :--- | :--- |
-| **Response Velocity** | 10-15 min per case | **< 60 seconds (93% faster)** |
+| **Response Velocity** | 10–15 min per case | **< 60 seconds (93% faster)** |
 | **Root Cause Analysis** | Manual log inspection | **Instant automated surfacing** |
-| **Incident Management** | Manual ticket entry | **Auto-ticket generation (Full report attached)** |
+| **Incident Management** | Manual ticket entry | **Auto-ticket per WARNING item (full report attached)** |
 | **System Maintenance** | Ad-hoc temp file cleanup | **Proactive cleanup on WARNING threshold** |
-| **Notification** | Manual escalation (Call/Chat) | **Real-time SMTP/Gmail alerts** |
-| **Scalability** | Single platform / Manual setup | **Cross-platform (Win/Mac/Linux)** |
-| **Data Integrity** | No persistent records | **Comprehensive timestamped logging** |
+| **Notification** | Manual escalation (Call / Chat) | **Real-time SMTP / Gmail alert** |
+| **Configuration** | Thresholds hardcoded in source | **Controlled via config.json — no code changes needed** |
+| **Scalability** | Single platform, manual setup | **Cross-platform: Windows (PowerShell) / macOS / Linux (Python)** |
+| **Data Integrity** | No persistent records | **Timestamped log + full audit trail per run** |
+ 
 
 ---
 ## 🛠️ How it works
@@ -71,10 +64,26 @@ python health_check.py
 python health_check.py
         |
         v
-  checkers.py             Measure CPU / RAM / Disk / Network / Services
+  health_check.py         Detect OS → select collector
+        |
+        +-- Windows -----> collectors/powershell/collector.py
+        |                  | subprocess call to collect_health.ps1
+        |                  | collect_health.ps1 imports Collectors.psm1
+        |                  | Get-CpuInfo / Get-MemoryInfo / Get-DiskInfo
+        |                  | Get-ServicesInfo / Get-NetworkInfo
+        |                  | ConvertTo-Json → stdout
+        |                  v
+        |                  json.loads() → v1.1 schema dict
+        |
+        +-- macOS/Linux -> collectors/python/collector.py
+                           | checkers.py → psutil
+                           | translate to v1.1 schema dict
+                           v
+ 
+  Both paths produce identical v1.1 schema dict
         |
         v
-  reporter.py             Build report — if WARNING -> call analyzers.py
+  reporter.py             Build report from schema — OS-aware service section
         |
         +-- OK ---------->  Print report + save log
         |
@@ -94,43 +103,46 @@ python health_check.py
                         v
                         integrations/health_check_client.py
                         | POST /api/tickets -> IT Ticket System
-                        | One ticket per WARNING item (CPU / RAM / Disk / Service)
-                        | Full diagnostic report attached to each ticket
+                        | One ticket per WARNING item
+                        | Full diagnostic report attached
                         | Fails gracefully if server is not running
 ```
 
 
 ## 📊 Sample Report Output
-The following is an actual diagnostic report generated by the tool.
-Normal state:
-```
-Running system health check...
 
+ 
+**Windows (PowerShell collector):**
+```
+  [COLLECTOR] Windows detected — using PowerShell collector
+ 
 ----------------------------------------
   SYSTEM HEALTH CHECK REPORT
-  2026-03-23 14:32:01
-  OS : Windows 11
+  2026-04-07 14:32:01
+  OS       : Windows Windows 11
+  Executor : PowerShell_Collector_v1
+  Host     : VAN-IT-WS01
 ----------------------------------------
 [CPU]
   Usage   : 23.0%  (8 cores)  [OK]
 [RAM]
-  Used    : 5.2 GB / 16.0 GB  (32%)  [OK]
+  Used    : 5.2 GB / 16.0 GB  (32.5%)  [OK]
 [DISK]
-  Used    : 112.4 GB / 476.0 GB  (24%)  [OK]
+  Used    : 112.4 GB / 476.0 GB  (23.6%)  [OK]
 [NETWORK]
   Status  : Connected  [OK]
-[SERVICES]
+[SERVICES]  (Windows)
   Spooler              Running  [OK]
   wuauserv             Running  [OK]
 ----------------------------------------
   OVERALL : ALL SYSTEMS OK
 ----------------------------------------
-
-Log saved -> C:\...\logs\health_20260323_143201.log
 ```
-
-WARNING with root cause analysis, cleanup, and alert:
+ 
+**WARNING with root cause analysis, cleanup, alert, and auto-ticketing:**
 ```
+  [COLLECTOR] Windows detected — using PowerShell collector
+ 
 ----------------------------------------
 [CPU]
   Usage   : 91.0%  (8 cores)  [WARNING]
@@ -138,129 +150,158 @@ WARNING with root cause analysis, cleanup, and alert:
      PID 4821   chrome.exe                47.3%
      PID 1204   python.exe                18.1%
      PID 3390   Teams.exe                 12.4%
-     PID 992    SearchIndexer.exe          8.2%
-     PID 512    svchost.exe                3.1%
 [RAM]
-  Used    : 14.1 GB / 16.0 GB  (88%)  [WARNING]
+  Used    : 14.1 GB / 16.0 GB  (88.1%)  [WARNING]
   >> Root cause analysis: top RAM-consuming processes
      PID 4821   chrome.exe                4821.3 MB
      PID 3390   Teams.exe                 1203.7 MB
-     PID 1204   python.exe                 512.2 MB
+[SERVICES]  (Windows)
+  Spooler              Running   [OK]
+  wuauserv             Not found [WARNING]
 ----------------------------------------
   OVERALL : WARNING - check items above
 ----------------------------------------
-
+ 
 OVERALL WARNING detected — running cleanup and sending alert...
-
+ 
   [CLEANUP] Admin privileges : No
-  [CLEANUP] C:\Users\username\AppData\Local\Temp    3 deleted, 20 locked (in use), 45.2 MB freed
-
-  [CLEANUP] System temp (C:\Windows\Temp) was skipped — requires admin privileges.
+  [CLEANUP] C:\Users\username\AppData\Local\Temp    3 deleted, 20 locked, 45.2 MB freed
   [CLEANUP] Relaunch as administrator to clean system temp? [y/N]:
-
+ 
   [EMAIL] Alert sent successfully.
-  
+ 
   [TICKET] Creating tickets for WARNING items...
   [TICKET] #1 created — P2 | Hardware | High CPU Usage Detected
   [TICKET] #2 created — P2 | Hardware | High Memory Usage Detected
+  [TICKET] #3 created — P2 | Hardware | Service Unavailable: wuauserv
 ```
 
 ## Module breakdown
 
 ```
 sys-health-check/
-├── health_check.py              # Entry point — orchestrates the full workflow
-├── checkers.py                  # Measures CPU, RAM, Disk, Network, Services
-├── analyzers.py                 # Identifies root cause when WARNING is detected
+├── health_check.py              # Orchestrator — detects OS, selects collector
+├── reporter.py                  # Builds report from v1.1 schema, saves log
+├── analyzers.py                 # Root cause analysis when WARNING detected
 ├── remediation.py               # Temp file cleanup with admin-aware logic
 ├── email_alert.py               # Gmail alert — standalone, single responsibility
-├── reporter.py                  # Builds the report and saves the log
 ├── utils.py                     # Shared helpers (separator, timestamp)
+├── config.json                  # Thresholds, service targets, network settings
+├── config.py                    # Python config loader (cached)
 ├── .env.example                 # Credential template (never commit .env)
 ├── .gitignore
 ├── logs/                        # Auto-generated timestamped log files
+│
+├── collectors/
+│   ├── python/
+│   │   ├── checkers.py          # psutil-based checks (macOS / Linux)
+│   │   └── collector.py        # Translates checkers.py output → v1.1 schema
+│   └── powershell/
+│       ├── Collectors.psm1      # PowerShell collection functions (Windows)
+│       ├── collect_health.ps1   # Orchestrator — imports .psm1, outputs JSON
+│       └── collector.py        # subprocess call → json.loads() → v1.1 schema
+│
+├── schemas/
+│   └── health_schema_v1.1.json  # Canonical data contract for all collectors
+│
 └── integrations/
-    ├── __init__.py              # Marks folder as a Python package
-    └── health_check_client.py  # HTTP client — sends WARNING alerts to IT Ticket System
+    ├── __init__.py
+    └── health_check_client.py   # HTTP client → IT Ticket System API
 ```
 
-**`health_check.py`** — Entry point orchestrates the workflow.
+
+**`health_check.py`** — Orchestrator. Detects OS, selects the correct collector, then drives the full workflow.
  
 ```python
-results          = run_all_checks()      # 1. measure
-report, overall  = build_report(results) # 2. build report
+collect          = get_collector()       # 0. select by OS
+data             = collect()             # 1. measure → v1.1 schema dict
+report, overall  = build_report(data)    # 2. build report
 save_log(report)                         # 3. save log
 if WARNING:                              # 4. act
     cleanup_temp_files()
     send_alert_email()
-    _create_tickets_for_warnings()       # 5. auto-create tickets per WARNING item
+    create_tickets_for_warnings()        # 5. auto-create tickets per WARNING item
+```
+**`config.json`** — Single source of truth for thresholds, service targets, and network settings. Shared by both Python and PowerShell collectors — no hardcoding in either.
+ 
+```json
+{
+  "thresholds": {
+    "cpu_warning_pct":    80,
+    "memory_warning_pct": 80,
+    "disk_warning_pct":   85
+  },
+  "services": {
+    "Windows": ["Spooler", "wuauserv"],
+    "Darwin":  ["com.apple.metadata.mds"],
+    "Linux":   ["cron", "ssh"]
+  },
+  "network": {
+    "dns_check_host": "google.com",
+    "dns_timeout_sec": 3
+  }
+}
 ```
  
-**`integrations/health_check_client.py`** — HTTP client that converts WARNING alerts into ticket payloads and POSTs them to the IT Ticket System API. Fails silently if the server is not running — health check continues normally either way.
+**`collectors/python/checkers.py`** — Runs health checks via psutil on macOS and Linux. Thresholds and service targets loaded from `config.json`.
+ 
+| Function | What it checks | WARNING threshold |
+|---|---|---|
+| `check_cpu()` | Usage %, core count | `cpu_warning_pct` from config |
+| `check_ram()` | Used / total GB | `memory_warning_pct` from config |
+| `check_disk()` | Used / total GB | `disk_warning_pct` from config |
+| `check_network()` | DNS resolution | Unreachable |
+| `check_services()` | OS-specific services | Not running |
+ 
+**`collectors/powershell/Collectors.psm1`** — PowerShell module containing all collection functions for Windows. Mirrors `checkers.py` in structure. Thresholds and service targets loaded from the same `config.json`.
+ 
+| Function | Method | What it collects |
+|---|---|---|
+| `Get-CpuInfo` | Performance Counter (Cooked Value avg) | CPU usage %, core count |
+| `Get-MemoryInfo` | WMI Win32_OperatingSystem | Memory used / total GB |
+| `Get-DiskInfo` | WMI Win32_LogicalDisk | Disk used / total GB (C:) |
+| `Get-ServicesInfo` | Get-Service | Windows service running status |
+| `Get-NetworkInfo` | System.Net.Dns | DNS resolution check |
+ 
+**`collectors/powershell/collect_health.ps1`** — Orchestrator for the PowerShell side. Imports `Collectors.psm1`, calls each function, assembles the v1.1 schema, and outputs it as JSON to stdout. Python reads this via subprocess.
+ 
+**`collectors/python/collector.py` / `collectors/powershell/collector.py`** — Translation layer. Converts raw collector output into the canonical v1.1 schema dict. `reporter.py` only knows about this schema — never about where the data came from.
+ 
+**`schemas/health_schema_v1.1.json`** — Data contract. Defines the exact field names and structure both collectors must produce. Acts as the source of truth when adding a new collector (e.g. Bash).
+ 
+**`analyzers.py`** — Triggered automatically when a check returns WARNING. Surfaces the root cause so the technician knows exactly what to fix.
+ 
+| Function | Triggered by | What it finds |
+|---|---|---|
+| `analyze_cpu()` | CPU WARNING | Top 5 CPU-consuming processes (PID, name, %) |
+| `analyze_ram()` | RAM WARNING | Top 5 memory-consuming processes (PID, name, MB) |
+| `analyze_disk()` | Disk WARNING | Top 5 largest items in home directory |
+| `analyze_network()` | Network WARNING | DNS → interfaces → internet reachability |
+ 
+**`remediation.py`** — Triggered only when OVERALL status is WARNING. Handles temp file cleanup with admin-aware logic.
+ 
+| Privilege | Directories cleaned |
+|---|---|
+| Admin | User temp + `C:\Windows\Temp` (Windows) / `/tmp` + `~/.cache` (macOS/Linux) |
+| No admin | User temp only — prompts to relaunch as admin for system temp |
+ 
+| Case | Behavior |
+|---|---|
+| Deleted successfully | Counted in `deleted`, size added to `freed_mb` |
+| Locked by another process (WinError 32) | Counted in `locked` — skipped safely |
+| Other OS error | Counted in `errors` |
+ 
+**`email_alert.py`** — Standalone Gmail alert module. Uses Python's `EmailMessage` API. Credentials loaded from `.env` — never hardcoded.
+ 
+**`integrations/health_check_client.py`** — HTTP client that converts WARNING check results into ticket payloads and POSTs them to the IT Ticket System API.
  
 | Alert type | Triggered by | Ticket title |
 |---|---|---|
 | `cpu` | CPU WARNING | High CPU Usage Detected |
 | `memory` | RAM WARNING | High Memory Usage Detected |
 | `disk` | Disk WARNING | Low Disk Space Detected |
-| `service_down` | Service / Network WARNING | Service Unavailable |
-
-**`checkers.py`** — Runs all health checks and returns structured results.
-
-| Function | What it checks | WARNING threshold |
-|---|---|---|
-| `check_cpu()` | Usage %, core count | >= 80% |
-| `check_ram()` | Used / total GB | >= 80% |
-| `check_disk()` | Used / total GB | >= 85% |
-| `check_network()` | DNS resolution to google.com | Unreachable |
-| `check_services()` | Key OS services running status | Not running |
-
-**`analyzers.py`** — Triggered automatically when a check returns WARNING. Surfaces the root cause so the technician knows exactly what to fix.
-
-| Function | Triggered by | What it finds |
-|---|---|---|
-| `analyze_cpu()` | CPU WARNING | Top 5 CPU-consuming processes (PID, name, %) |
-| `analyze_ram()` | RAM WARNING | Top 5 memory-consuming processes (PID, name, MB) |
-| `analyze_disk()` | Disk WARNING | Top 5 largest items in home directory |
-| `analyze_network()` | Network WARNING | DNS -> interfaces -> internet reachability |
-
-**`remediation.py`** — Triggered only when OVERALL status is WARNING. Handles temp file cleanup with admin-aware logic.
-
-| Function | What it does |
-|---|---|
-| `is_admin()` | Checks for administrator privileges (Windows UAC / Unix root) |
-| `_get_temp_paths(admin)` | Returns temp paths based on privilege level |
-| `_clean_directory(path)` | Cleans a single directory, distinguishes locked files from real errors |
-| `cleanup_temp_files()` | Orchestrates cleanup, prompts admin relaunch if needed |
-
-Temp file cleanup behavior:
-
-| Privilege | Directories cleaned |
-|---|---|
-| Admin | User temp + `C:\Windows\Temp` (Windows) / `/tmp` + `~/.cache` (macOS/Linux) |
-| No admin | User temp only — prompts to relaunch as admin for system temp |
-
-File handling during cleanup:
-
-| Case | Behavior |
-|---|---|
-| Deleted successfully | Counted in `deleted`, size added to `freed_mb` |
-| Locked by another process (WinError 32) | Counted in `locked` — skipped safely |
-| Other OS error | Counted in `errors` |
-
-**`email_alert.py`** — Standalone Gmail alert module. Single responsibility: compose and send the alert email.
-
-| Function | What it does |
-|---|---|
-| `_build_email_body()` | Composes email body from report and cleanup summary |
-| `send_alert_email()` | Sends Gmail alert via SMTP SSL using EmailMessage API |
-
-Uses Python's `EmailMessage` (modern API) which handles encoding natively. Credentials loaded from `.env` — never hardcoded.
-
-**`reporter.py`** — Assembles the final report from all check and analysis results, then saves it as a timestamped log.
-
-**`utils.py`** — Shared helpers used across all modules (`separator()`, `timestamp()`).
-
+| `network` | Network WARNING | Network Connectivity Lost |
+| `service` | Service WARNING | Service Unavailable: {name} |
 
 ---
 ## Integration with IT Ticket System
@@ -283,6 +324,19 @@ it-ticket-system
  
 The integration is **optional and non-blocking** — if the IT Ticket System server is not running, `health_check.py` continues normally and prints `[TICKET] Skipped`.
  
+
+
+## 🗺️ Roadmap
+ 
+- [x] **v1.0** — Python-based health check: CPU, RAM, Disk, Network, Services
+- [x] **v1.0** — Root cause analysis, temp cleanup, Gmail alert, auto-ticketing
+- [x] **v1.1** — Collector architecture: OS detection → Python or PowerShell collector
+- [x] **v1.1** — PowerShell collector: `Collectors.psm1` module + `collect_health.ps1`
+- [x] **v1.1** — Canonical v1.1 JSON schema: shared data contract across all collectors
+- [x] **v1.1** — `config.json`: thresholds and service targets shared by both collectors
+- [ ] **v1.2** — Bash collector for Linux environments
+- [ ] **v1.3** — Scheduled task support: run silently without prompts (`--mode user/admin`)
+
 ---
 ## Requirements
 

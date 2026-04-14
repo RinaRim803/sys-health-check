@@ -1,0 +1,18 @@
+{
+  "thresholds": {
+    "cpu_warning_pct":    80,
+    "memory_warning_pct": 80,
+    "disk_warning_pct":   85
+  },
+
+  "services": {
+    "Windows": ["Spooler", "wuauserv"],
+    "Darwin":  ["com.apple.metadata.mds"],
+    "Linux":   ["cron", "ssh"]
+  },
+
+  "network": {
+    "dns_check_host": "google.com",
+    "dns_timeout_sec": 3
+  }
+}
