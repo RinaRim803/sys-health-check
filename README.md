@@ -60,6 +60,8 @@ python health_check.py
 ---
 ## 🛠️ How it works
 
+<img width="1408" height="768" alt="sys-health-checker-system-architecture-visualization" src="https://github.com/user-attachments/assets/ba63a820-0b5c-4b88-99ad-458b83a5d461" />
+
 ```
 python health_check.py
         |
